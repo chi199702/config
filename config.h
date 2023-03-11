@@ -46,7 +46,7 @@ BOOL parse(Config* const config, const char* const path);
 /* get [key, value] though key 
  * return non-NULL while [key, value] is exist, otherwise return NULL, if exist multiple same key [key, value], return the first meet
  * */
-Item* get_pair(const Config* const config, const char* const key);
+Item* get_item(const Config* const config, const char* const key);
 
 /* print the list */
 void print(const Config* const config);

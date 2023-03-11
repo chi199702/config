@@ -3,13 +3,42 @@
 #include <stdlib.h>
 #include <ctype.h>
 #include <stddef.h>
+#include <limits.h>
 #include "config.h"
 
+/* be used to print a Config */
+typedef struct {
+  char* print_space;    /* save a Config */
+  unsigned int length;  /* buffer length */
+  unsigned int offset;  /* next character will be save in buffer[offset] */
+}print_buffer;
+
+/*
+ * parse a item
+ * return non-zero if success, otherwise return NULL
+ * */
 static Item* parse_item(Config* config, const char* const buffer);
+
+/* return TRUE(1) while parse success,otherwise return FALSE(0) */
 static BOOL  parse_with_file_pointer(Config* const config, FILE* file_pointer);
-static Item* find_pair(const Config* const config, const char* const key);
+
+/* according to key, find the [key, string] item, return non-NULL if exist the [key, string], otherwise return NULL */
+static Item* find_item(const Config* const config, const char* const key);
+
+/* free a item recursively */
 static void  free_item(Item* item);
+
+/* free a config recursively */
 static void  free_config(Config* config);
+
+/* print a Config */
+static void  _print(const Config* const config);
+
+/* ensure the print_buffer has enough space to print, use C API realloc to expand the old space, new buffer size is about old buffer size * 2 */
+static BOOL ensure_print_buffer(print_buffer* buffer, int need_space);
+
+/* after new character input buffer -> print_buffer, update offset */
+void update_offset(print_buffer* buffer);
 
 /* skip blank, must push back buffer if the last character is not blank, string starting with # will be considered as comment */
 static void skip_blank_and_comment(FILE* file_pointer) {
@@ -68,6 +97,7 @@ static Item* create_item(const Config* const config) {
     fprintf(stderr, "null pointer exception occur in function create_item");
     return NULL;
   }
+
   Config* current_config = (Config*)config;
   while (current_config -> next != NULL) {
     current_config = current_config -> next;
@@ -148,10 +178,6 @@ static Item* add_item(Config* const config, FILE* file_pointer) {
   return parse_item(config, buffer); /* parse_item function will parse the item and add it to the end of config */ 
 }
 
-/*
- * parse a item
- * return non-zero if success, otherwise return NULL
- * */
 static Item* parse_item(Config* config, const char* const buffer) {
   if (!strlen(buffer)) {
     return NULL;
@@ -291,7 +317,6 @@ BOOL parse(Config* const config, const char* const path) {
   return FALSE;
 }
 
-/* return TRUE(1) while parse success,otherwise return FALSE(0) */
 static BOOL parse_with_file_pointer(Config* const config, FILE* file_pointer) {
   skip_blank_and_comment(file_pointer);
 
@@ -320,10 +345,10 @@ Item* get_pair(const Config* const config, const char* const key) {
   if (config == NULL || key == NULL) {
     return NULL;
   } 
-  return find_pair(config, key); 
+  return find_item(config, key); 
 }
 
-static Item* find_pair(const Config* const config, const char* const key) {
+static Item* find_item(const Config* const config, const char* const key) {
   Item* item = NULL;
   Config* current_config = (Config*)config;  
 
@@ -344,7 +369,77 @@ static Item* find_pair(const Config* const config, const char* const key) {
 }
 
 void print(const Config* const config) {
-  char buffer[PRINT_BUFFER];
+  if (!config) {
+    return;
+  }
+  _print(config);
+}
+
+static void _print(const Config* const config) {
+  print_buffer* buffer;
+  if ((buffer = (print_buffer*)malloc(sizeof(print_buffer))) == NULL) {
+    fprintf(stderr, "error occur, memory is not enough to malloc!");
+    return;
+  }
+  if ((buffer -> print_space = (char*)malloc(sizeof(char) * PRINT_BUFFER)) == NULL) {
+    fprintf(stderr, "error occur, memory is not enough to malloc!");
+    return;
+  }
+  buffer -> length = PRINT_BUFFER;
+  buffer -> offset = 0;
+  
+  Config* current_config = (Config*)config;
+  while (current_config) {
+    /* print Config */
+    {
+      unsigned int config_name_length = strlen(current_config -> name); 
+      if (ensure_print_buffer(buffer, config_name_length + 3) == FALSE) { /* +3 : '[', ']', '\n' */
+        buffer -> print_space[buffer -> offset++] = '[';
+        
+      }
+    }
+  }
+}
+
+static BOOL ensure_print_buffer(print_buffer* buffer, int need_space) {
+  if (!buffer) {
+    return FALSE;
+  } 
+  if (buffer -> length - buffer -> offset > need_space) { /* has enough space to print, no need to realloc */
+    return TRUE;
+  } 
+
+  need_space += buffer -> offset + 1;
+  /* calculate new buffer size */
+  if (need_space > INT_MAX / 2) {
+    if (need_space <= INT_MAX) {
+      need_space = INT_MAX;
+    }else {
+      return FALSE; /* can not malloc too much memory */
+    }
+  }else {
+    need_space *= 2;
+  }
+  
+  unsigned int new_size = buffer -> length + need_space;
+  char* new_buffer = NULL;
+  if ((new_buffer = realloc(buffer -> print_space, new_size)) == NULL) {
+    fprintf(stderr, "error occur in function ensure_print_buffer : realloc buffer error, may be no enough space to malloc");
+    return FALSE;
+  }
+  buffer -> print_space = new_buffer;
+  buffer -> length = new_size;
+  
+  return FALSE;
+}
+
+void update_offset(print_buffer* buffer) {
+  if (buffer == NULL || buffer -> print_space == NULL) {
+    return;
+  }
+  
+  const char* old_buffer_pointer = buffer -> print_space + buffer -> offset;
+  buffer -> offset += strlen(old_buffer_pointer);
 }
 
 /* free Config* */
@@ -352,7 +447,6 @@ void free_all(Config* config) {
   free_config(config); 
 }
 
-/* free a config recursively */
 static void free_config(Config* config) {
   if (!config) {
     return;
@@ -366,7 +460,6 @@ static void free_config(Config* config) {
   }
 }
 
-/* free a item recursively */
 static void free_item(Item* item) {
   if (!item) {
     return;
